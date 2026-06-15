@@ -692,6 +692,37 @@ async def get_candidates(
     jd_id: Optional[str] = None,
     current_user: dict = Depends(get_current_recruiter)
 ):
+    # Ensure any candidate profiles missing visibility default to public on the fly
+    await candidate_profiles_collection.update_many(
+        {"visibility": {"$exists": False}},
+        {"$set": {"visibility": "public"}}
+    )
+
+    # Create placeholder candidate profiles for users registered as candidates who never completed onboarding
+    from .database import users_collection
+    user_cursor = users_collection.find({"role": "candidate"})
+    async for u in user_cursor:
+        email = u.get("email")
+        if email:
+            existing = await candidate_profiles_collection.find_one({"email": email})
+            if not existing:
+                new_profile = {
+                    "name": u.get("name") or email.split("@")[0].replace(".", " ").title(),
+                    "email": email,
+                    "phone": u.get("phone", ""),
+                    "location": "Pakistan",
+                    "title": "Job Seeker",
+                    "experience": 0,
+                    "total_experience": 0.0,
+                    "score": 0,
+                    "skills": [],
+                    "visibility": "public",
+                    "status": "new",
+                    "recruiter_statuses": {},
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }
+                await candidate_profiles_collection.insert_one(new_profile)
+
     x_user_id = str(current_user["_id"])
     user_email = current_user.get("email")
     visibility_or = [{"visibility": "public"}, {"owner_id": x_user_id}]
@@ -759,6 +790,12 @@ async def get_candidates(
         del c["_id"]
         c["status"] = c.get("recruiter_statuses", {}).get(x_user_id, "new")
         
+        # Ensure experience is normalized for all formats
+        exp_val = c.get("total_experience", c.get("experience", c.get("experience_years", c.get("years_of_experience", 0))))
+        c["experience"] = exp_val
+        c["total_experience"] = exp_val
+        c["experience_years"] = exp_val
+        
         if target_jd:
             from .ranker import manual_ranker
             target_skills = target_jd.get("core_skills", [])
@@ -767,7 +804,7 @@ async def get_candidates(
             cand_skills = c.get("skills", c.get("skills_extracted", []))
             skill_score = manual_ranker(target_skills, cand_skills) * 100
             
-            actual_exp = c.get("total_experience", c.get("experience_years", c.get("experience", 0)))
+            actual_exp = exp_val
             exp_score = 100 if actual_exp >= required_exp else (actual_exp / required_exp) * 100
             
             final_weighted_score = (skill_score * 0.7) + (exp_score * 0.3)
@@ -1007,76 +1044,83 @@ async def get_job_results(job_id: str, current_user: dict = Depends(get_current_
         sort=[("created_at", -1)]
     )
     
-    candidates = []
-    mode = "global"
-    if screening:
-        candidates = screening.get("candidates", [])
-        mode = screening.get("mode", "global")
-        # Update each candidate's status with the latest recruiter-specific status
-        cand_ids = []
-        for c in candidates:
-            c_id = c.get("id") or c.get("_id")
-            if c_id:
-                cand_ids.append(c_id)
-        if cand_ids:
-            from bson import ObjectId
-            obj_ids = []
-            for cid in cand_ids:
-                try:
-                    obj_ids.append(ObjectId(cid))
-                except Exception:
-                    pass
-            profiles_cursor = candidate_profiles_collection.find({"_id": {"$in": obj_ids}})
-            profiles = await profiles_cursor.to_list(length=len(obj_ids))
-            profiles_map = {str(p["_id"]): p for p in profiles}
-            for c in candidates:
-                c_id = c.get("id") or c.get("_id")
-                if c_id and str(c_id) in profiles_map:
-                    c["status"] = profiles_map[str(c_id)].get("recruiter_statuses", {}).get(x_user_id, "new")
-                else:
-                    c["status"] = "new"
-        
-    if not candidates:
-        mode = "global"
-        user_email = current_user.get("email")
+    # Determine the mode from the existing screening (default to global)
+    mode = screening.get("mode", "global") if screening else "global"
+    
+    # Query candidate profiles according to matching mode
+    user_email = current_user.get("email")
+    if mode == "private":
+        query = {"visibility": "private", "owner_id": x_user_id}
+    else:
         visibility_or = [{"visibility": "public"}, {"owner_id": x_user_id}]
         if user_email:
             visibility_or.append({"email": user_email})
         query = {"$or": visibility_or}
-        cursor = candidate_profiles_collection.find(query)
-        db_candidates = await cursor.to_list(length=100)
         
-        from .ranker import manual_ranker
-        target_skills = jd.get("core_skills", [])
-        required_exp = jd.get("min_experience", 3)
+    cursor = candidate_profiles_collection.find(query)
+    db_candidates = await cursor.to_list(length=1000)
+    
+    candidates = []
+    from .ranker import manual_ranker
+    target_skills = jd.get("core_skills", [])
+    required_exp = jd.get("min_experience", 3)
+    
+    for c in db_candidates:
+        cand_skills = c.get("skills", c.get("skills_extracted", []))
+        skill_score = manual_ranker(target_skills, cand_skills) * 100
         
-        for c in db_candidates:
-            cand_skills = c.get("skills", c.get("skills_extracted", []))
-            skill_score = manual_ranker(target_skills, cand_skills) * 100
+        raw_exp = c.get("total_experience", c.get("experience_years", c.get("experience", 0)))
+        try:
+            actual_exp = float(raw_exp) if raw_exp is not None else 0.0
+        except (ValueError, TypeError):
+            actual_exp = 0.0
             
-            actual_exp = c.get("total_experience", c.get("experience_years", c.get("experience", 0)))
-            exp_score = 100 if actual_exp >= required_exp else (actual_exp / required_exp) * 100
-            
-            final_weighted_score = (skill_score * 0.7) + (exp_score * 0.3)
-            
-            candidates.append({
-                "id": str(c["_id"]),
-                "name": c.get("name", "Unknown Candidate"),
-                "email": c.get("email", ""),
-                "phone": c.get("phone", ""),
-                "title": c.get("title", "Candidate Profile"),
-                "skills_extracted": cand_skills,
-                "experience_years": actual_exp,
-                "match_score_percentage": round(final_weighted_score),
-                "cv_file_path": c.get("original_cv_path", "").replace("\\", "/") if c.get("original_cv_path") else "",
-                "status": c.get("recruiter_statuses", {}).get(x_user_id, "new"),
-                "experiences": c.get("experiences", []),
-                "education": c.get("education", [])
-            })
-            
-        candidates.sort(key=lambda x: x.get("match_score_percentage", 0), reverse=True)
+        exp_score = 100 if actual_exp >= required_exp else (actual_exp / required_exp) * 100
+        final_weighted_score = (skill_score * 0.7) + (exp_score * 0.3)
         
+        cv_path = c.get("original_cv_path") or c.get("cv_file_path") or ""
+        cv_file_path = cv_path.replace("\\", "/") if cv_path else ""
+        
+        candidates.append({
+            "id": str(c["_id"]),
+            "name": c.get("name", "Unknown Candidate"),
+            "email": c.get("email", ""),
+            "phone": c.get("phone", ""),
+            "location": c.get("location", ""),
+            "title": c.get("title", "Candidate Profile"),
+            "skills_extracted": cand_skills,
+            "experience_years": actual_exp,
+            "match_score_percentage": round(final_weighted_score),
+            "cv_file_path": cv_file_path,
+            "status": c.get("recruiter_statuses", {}).get(x_user_id, "new"),
+            "experiences": c.get("experiences", []),
+            "education": c.get("education", [])
+        })
+        
+    candidates.sort(key=lambda x: x.get("match_score_percentage", 0), reverse=True)
     candidates = [c for c in candidates if c.get("match_score_percentage", 0) > 45]
+    
+    # Update the screening session database entry with the new list and timestamp
+    if screening:
+        await screenings_collection.update_one(
+            {"_id": screening["_id"]},
+            {"$set": {
+                "candidates": candidates,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        # Save a new screening document if one doesn't exist
+        screening_doc = {
+            "recruiter_id": x_user_id,
+            "owner_id": x_user_id,
+            "jd_id": job_id,
+            "mode": mode,
+            "candidates": candidates,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await screenings_collection.insert_one(screening_doc)
+        
     return {
         "job": {
             "id": str(jd["_id"]),

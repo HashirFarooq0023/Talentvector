@@ -116,6 +116,7 @@ function CandidatesPage() {
       return res.json()
     },
     enabled: !!userId,
+    refetchInterval: 5000, // Refresh automatically every 5 seconds if changes occur
   })
 
   const filteredCandidates = candidatesData || []
@@ -351,7 +352,7 @@ function CandidatesPage() {
               const isSelf = cand.email && userEmail && cand.email.toLowerCase() === userEmail.toLowerCase()
               const avatar = isSelf && userPicture ? userPicture : (cand.avatar || `https://api.dicebear.com/9.x/notionists/svg?seed=${encodeURIComponent(name)}`)
               const location = cand.location || "Not specified"
-              const experience = cand.experience ?? cand.experience_years ?? cand.years_of_experience ?? 0
+              const experience = cand.experience ?? cand.total_experience ?? cand.experience_years ?? cand.years_of_experience ?? 0
               const skills = cand.skills || cand.skills_extracted || []
               const candStatus = cand.status || "new"
               const appliedDate = cand.appliedDate || cand.applied_date || (cand.created_at ? new Date(cand.created_at).toLocaleDateString() : "Recently")

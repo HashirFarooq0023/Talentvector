@@ -1,6 +1,6 @@
-
 import re
 from datetime import datetime
+from typing import Optional
 import spacy
 import json
 import os
@@ -156,9 +156,47 @@ def calculate_experience_robust(text, is_jd=False):
     years = round(total_months / 12)
     return (years if years > 0 else 1), False
 
+PAKISTANI_CITIES_LIST = [
+    "Karachi", "Lahore", "Islamabad", "Rawalpindi", "Peshawar", 
+    "Faisalabad", "Multan", "Quetta", "Sialkot", "Hyderabad", 
+    "Gujranwala", "Sargodha", "Bahawalpur", "Sukkur", "Sheikhupura", 
+    "Larkana", "Gujrat", "Jhelum", "Sahiwal", "Okara", "Wah Cantt", 
+    "Mardan", "Kasur", "Talagang", "Chiniot", "Dera Ghazi Khan", 
+    "Dera Ismail Khan", "Abbottabad", "Mirpur", "Muzaffarabad", 
+    "Gilgit", "Gwadar", "Skardu", "Burewala", "Kamoke", "Sadiqabad", 
+    "Khanewal", "Muzaffargarh", "Attock", "Chishtian", "Bahawalnagar", 
+    "Pakpattan", "Toba Tek Singh", "Vihari", "Murree", "Nawabshah", 
+    "Mirpur Khas", "Jacobabad", "Shikarpur", "Khairpur", "Thatta", 
+    "Badin", "Kohat", "Swat", "Mingora", "Nowshera", "Mansehra", 
+    "Bannu", "Charsadda", "Turbat", "Khuzdar", "Sibi", "Chaman", "Zhob"
+]
+
+def extract_pakistani_city(text: str) -> Optional[str]:
+    """Scan text for Pakistani cities and return the first match or None."""
+    text_lower = text.lower()
+    for city in PAKISTANI_CITIES_LIST:
+        pattern = rf"\b{re.escape(city.lower())}\b"
+        if re.search(pattern, text_lower):
+            if city in ["Lahore", "Rawalpindi", "Faisalabad", "Multan", "Sialkot", "Gujranwala", "Sargodha", "Bahawalpur", "Sheikhupura", "Gujrat", "Jhelum", "Sahiwal", "Okara", "Kasur", "Chiniot", "Dera Ghazi Khan", "Wah Cantt", "Talagang", "Burewala", "Kamoke", "Sadiqabad", "Khanewal", "Muzaffargarh", "Attock", "Chishtian", "Bahawalnagar", "Pakpattan", "Toba Tek Singh", "Vihari", "Murree"]:
+                return f"{city}, Punjab"
+            elif city in ["Karachi", "Hyderabad", "Sukkur", "Larkana", "Nawabshah", "Mirpur Khas", "Jacobabad", "Shikarpur", "Khairpur", "Thatta", "Badin"]:
+                return f"{city}, Sindh"
+            elif city in ["Peshawar", "Mardan", "Abbottabad", "Dera Ismail Khan", "Kohat", "Swat", "Mingora", "Nowshera", "Mansehra", "Bannu", "Charsadda"]:
+                return f"{city}, KPK"
+            elif city in ["Quetta", "Gwadar", "Turbat", "Khuzdar", "Sibi", "Chaman", "Zhob"]:
+                return f"{city}, Balochistan"
+            elif city in ["Islamabad"]:
+                return "Islamabad, ICT"
+            elif city in ["Muzaffarabad", "Mirpur"]:
+                return f"{city}, Azad Kashmir"
+            elif city in ["Gilgit", "Skardu"]:
+                return f"{city}, Gilgit-Baltistan"
+            return city
+    return None
+
 def extract_entities(text, is_jd=False):
     """
-    Extracts Name, Email, Categorized Skills, and Experience.
+    Extracts Name, Email, Categorized Skills, Experience, and Location.
     """
     cleaned_text = clean_text(text)
     
@@ -166,6 +204,7 @@ def extract_entities(text, is_jd=False):
         "Name": "Unknown",
         "Email": "Not Found",
         "Phone": "Not Found",
+        "Location": None,
         "Skills": [],
         "Categorized_Skills": {},
         "Designation": "Not Found",
@@ -186,6 +225,9 @@ def extract_entities(text, is_jd=False):
 
     # 2. Name Extraction
     entities["Name"] = extract_name(text)
+
+    # Location Extraction
+    entities["Location"] = extract_pakistani_city(text)
 
     # 3. Experience Calculation (JD-aware)
     exp_val, is_plus = calculate_experience_robust(text, is_jd=is_jd)

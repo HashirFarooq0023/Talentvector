@@ -20,7 +20,8 @@ import {
   Phone,
   Mail,
   User,
-  Plus
+  Plus,
+  MapPin
 } from 'lucide-react'
 
 import { Progress } from '../components/ui/progress'
@@ -51,6 +52,7 @@ function UserProfilePage() {
     name: '',
     email: '',
     phone: '',
+    location: '',
     sector: 'Technology',
     raw_category: '',
     total_experience: 0,
@@ -76,6 +78,7 @@ function UserProfilePage() {
           name: userName, // Always use the Gmail name
           email: userEmail, // Always use the Gmail email
           phone: pendingData.contact_phone || pendingData.phone || "",
+          location: pendingData.detected_location || "",
           sector: pendingData.detected_sector || "Technology",
           raw_category: pendingData.detected_raw_category || "",
           total_experience: pendingData.detected_experience || 0,
@@ -85,13 +88,17 @@ function UserProfilePage() {
         setProfile(newProfile)
 
         // Save to backend immediately so the profile is created
+        const savedProfile = {
+          ...newProfile,
+          location: newProfile.location === '__other__' ? '' : newProfile.location
+        }
         await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/candidate/profile`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem("access_token")}`
           },
-          body: JSON.stringify(newProfile)
+          body: JSON.stringify(savedProfile)
         })
 
         // Remove from localStorage so we don't overwrite it again next time
@@ -120,6 +127,7 @@ function UserProfilePage() {
             name: userName,
             email: userEmail,
             phone: '',
+            location: '',
             sector: 'Technology',
             raw_category: '',
             total_experience: 0,
@@ -162,6 +170,7 @@ function UserProfilePage() {
         const data = await response.json()
         setProfile(prev => ({
           ...prev,
+          location: data.detected_location || '',
           sector: data.detected_sector || 'General',
           raw_category: data.detected_raw_category || '',
           total_experience: data.detected_experience || prev.total_experience,
@@ -204,13 +213,17 @@ function UserProfilePage() {
     setShowSuccess(false)
 
     try {
+      const savedProfile = {
+        ...profile,
+        location: profile.location === '__other__' ? '' : profile.location
+      }
       const response = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/candidate/profile`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem("access_token")}`
         },
-        body: JSON.stringify(profile)
+        body: JSON.stringify(savedProfile)
       })
 
       if (response.ok) {
@@ -278,6 +291,12 @@ function UserProfilePage() {
               <div className="flex items-center gap-2.5 text-slate-600 font-semibold text-xs min-w-0">
                 <Phone className="w-4 h-4 text-primary/60 shrink-0" />
                 <span className="truncate text-slate-700 font-bold">{profile.phone}</span>
+              </div>
+            )}
+            {(profile.location && profile.location !== '__other__') && (
+              <div className="flex items-center gap-2.5 text-slate-600 font-semibold text-xs min-w-0">
+                <MapPin className="w-4 h-4 text-primary/60 shrink-0" />
+                <span className="truncate text-slate-700 font-bold">{profile.location}</span>
               </div>
             )}
             <div className="flex items-center gap-2.5 text-slate-500 font-medium text-xs">
@@ -366,7 +385,7 @@ function UserProfilePage() {
                 className="w-full h-11 px-4 rounded-xl border border-slate-200 focus:border-primary outline-none transition-all text-xs font-bold text-slate-800"
               />
             </div>
-            <div className="flex flex-col gap-1.5 md:col-span-2">
+            <div className="flex flex-col gap-1.5">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Professional Sector</label>
               <select
                 name="sector"
@@ -376,6 +395,116 @@ function UserProfilePage() {
               >
                 {['Technology', 'Healthcare', 'Finance', 'Education', 'Sales', 'Management', 'Legal', 'General'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">City / Location</label>
+              {(() => {
+                const PK_CITIES = [
+                  "Islamabad, ICT",
+                  "Karachi, Sindh",
+                  "Lahore, Punjab",
+                  "Abbottabad, KPK",
+                  "Attock, Punjab",
+                  "Badin, Sindh",
+                  "Bahawalnagar, Punjab",
+                  "Bahawalpur, Punjab",
+                  "Bannu, KPK",
+                  "Burewala, Punjab",
+                  "Chaman, Balochistan",
+                  "Charsadda, KPK",
+                  "Chiniot, Punjab",
+                  "Chishtian, Punjab",
+                  "Dera Ghazi Khan, Punjab",
+                  "Dera Ismail Khan, KPK",
+                  "Faisalabad, Punjab",
+                  "Gilgit, Gilgit-Baltistan",
+                  "Gujranwala, Punjab",
+                  "Gujrat, Punjab",
+                  "Gwadar, Balochistan",
+                  "Hyderabad, Sindh",
+                  "Jacobabad, Sindh",
+                  "Jhang, Punjab",
+                  "Jhelum, Punjab",
+                  "Kamoke, Punjab",
+                  "Kasur, Punjab",
+                  "Khairpur, Sindh",
+                  "Khanewal, Punjab",
+                  "Khuzdar, Balochistan",
+                  "Kohat, KPK",
+                  "Larkana, Sindh",
+                  "Mansehra, KPK",
+                  "Mardan, KPK",
+                  "Mingora, KPK",
+                  "Mirpur Khas, Sindh",
+                  "Mirpur, Azad Kashmir",
+                  "Multan, Punjab",
+                  "Murree, Punjab",
+                  "Muzaffarabad, Azad Kashmir",
+                  "Muzaffargarh, Punjab",
+                  "Nawabshah, Sindh",
+                  "Nowshera, KPK",
+                  "Okara, Punjab",
+                  "Pakpattan, Punjab",
+                  "Peshawar, KPK",
+                  "Quetta, Balochistan",
+                  "Rawalpindi, Punjab",
+                  "Sadiqabad, Punjab",
+                  "Sahiwal, Punjab",
+                  "Sargodha, Punjab",
+                  "Sheikhupura, Punjab",
+                  "Shikarpur, Sindh",
+                  "Sibi, Balochistan",
+                  "Sialkot, Punjab",
+                  "Skardu, Gilgit-Baltistan",
+                  "Sukkur, Sindh",
+                  "Swat, KPK",
+                  "Talagang, Punjab",
+                  "Thatta, Sindh",
+                  "Toba Tek Singh, Punjab",
+                  "Turbat, Balochistan",
+                  "Vihari, Punjab",
+                  "Wah Cantt, Punjab",
+                  "Zhob, Balochistan"
+                ];
+                const location = profile.location || "";
+                const isStandard = PK_CITIES.includes(location);
+                const isCustom = location && !isStandard;
+
+                return (
+                  <>
+                    <select
+                      value={isStandard ? location : (isCustom ? 'Other' : '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'Other') {
+                          setProfile(prev => ({ ...prev, location: '__other__' }));
+                        } else {
+                          setProfile(prev => ({ ...prev, location: val }));
+                        }
+                      }}
+                      className="w-full h-11 px-4 rounded-xl border border-slate-200 focus:border-primary outline-none text-xs font-bold text-slate-800 bg-white"
+                    >
+                      <option value="">Select City</option>
+                      {PK_CITIES.map(city => (
+                        <option key={city} value={city}>{city}</option>
+                      ))}
+                      <option value="Other">Other (Custom City)</option>
+                    </select>
+                    {(isCustom || location === '__other__') && (
+                      <input
+                        type="text"
+                        placeholder="Enter city name (e.g. Abbottabad, KPK)"
+                        value={location === '__other__' ? '' : location}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setProfile(prev => ({ ...prev, location: val || '__other__' }));
+                        }}
+                        className="w-full h-11 px-4 rounded-xl border border-slate-200 focus:border-primary outline-none transition-all text-xs font-bold text-slate-800 mt-1.5"
+                      />
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

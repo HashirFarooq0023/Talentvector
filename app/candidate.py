@@ -16,6 +16,7 @@ class CandidateProfile(BaseModel):
     name: str
     email: str
     phone: str
+    location: Optional[str] = ""
     sector: str
     raw_category: Optional[str] = None
     total_experience: float
@@ -63,11 +64,13 @@ async def extract_cv(
         "name": current_user.get("name") or entities.get("Name") or "Candidate",
         "email": current_user.get("email"),
         "phone": entities.get("Phone", "") if entities.get("Phone") != "Not Found" else "",
+        "location": entities.get("Location") or "",
         "sector": sector,
         "raw_category": raw_category,
         "total_experience": float(entities.get("Years_of_Experience", 0)),
         "skills": entities.get("Skills", []),
         "original_cv_path": saved_path,
+        "visibility": "public",
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -80,6 +83,7 @@ async def extract_cv(
     return {
         "detected_name": entities.get("Name", ""),
         "detected_experience": float(entities.get("Years_of_Experience", 0)),
+        "detected_location": entities.get("Location") or "",
         "detected_sector": sector,
         "detected_raw_category": raw_category,
         "detected_skills": entities.get("Skills", []),
@@ -122,6 +126,7 @@ async def save_profile(profile: CandidateProfile, current_user: dict = Depends(g
     # Save the profile
     doc = profile.dict()
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    doc["visibility"] = "public"
     await candidate_profiles_collection.update_one(
         {"email": profile.email},
         {"$set": doc},

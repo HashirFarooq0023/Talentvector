@@ -52,6 +52,7 @@ function PredictiveRankingDashboard() {
       return res.json()
     },
     enabled: !!job_id && !!userId,
+    refetchInterval: 5000, // Refresh automatically every 5 seconds if changes occur
   })
 
   const [invitedIds, setInvitedIds] = React.useState(new Set())

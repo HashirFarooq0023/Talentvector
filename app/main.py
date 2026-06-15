@@ -80,6 +80,40 @@ async def lifespan(app: FastAPI):
         print("Pinged your deployment. You successfully connected to MongoDB!")
         # Seed candidates
         await seed_candidates_if_empty()
+        
+        # Retroactively set visibility to public for any candidate profiles missing the visibility field
+        update_result = await candidate_profiles_collection.update_many(
+            {"visibility": {"$exists": False}},
+            {"$set": {"visibility": "public"}}
+        )
+        if update_result.modified_count > 0:
+            print(f"Migration: Set visibility='public' for {update_result.modified_count} existing candidate profile(s) missing it.")
+
+        # Create placeholder candidate profiles for users registered as candidates who never completed onboarding
+        from .database import users_collection
+        user_cursor = users_collection.find({"role": "candidate"})
+        async for u in user_cursor:
+            email = u.get("email")
+            if email:
+                existing = await candidate_profiles_collection.find_one({"email": email})
+                if not existing:
+                    new_profile = {
+                        "name": u.get("name") or email.split("@")[0].replace(".", " ").title(),
+                        "email": email,
+                        "phone": u.get("phone", ""),
+                        "location": "Pakistan",
+                        "title": "Job Seeker",
+                        "experience": 0,
+                        "total_experience": 0.0,
+                        "score": 0,
+                        "skills": [],
+                        "visibility": "public",
+                        "status": "new",
+                        "recruiter_statuses": {},
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    await candidate_profiles_collection.insert_one(new_profile)
+                    print(f"Migration: Created default profile for registered candidate {email}")
     except Exception as e:
         print(f"MongoDB connection error: {e}")
     yield
